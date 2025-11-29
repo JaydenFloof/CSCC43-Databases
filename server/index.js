@@ -616,7 +616,6 @@ app.post("/api/friends/respond", async (req, res) => {
 app.get("/api/friends/:userId", async (req, res) => {
   const uid = req.params.userId;
   try {
-    // case for requester or responder uid
     const result = await pool.query(
       "SELECT users.uid, users.username FROM users JOIN friend_request AS req ON users.uid = CASE WHEN req.requester_uid = $1 THEN req.responder_uid ELSE req.requester_uid END WHERE ((req.requester_uid = $1) OR (req.responder_uid = $1)) AND req.is_accepted = TRUE",
       [uid]
@@ -750,6 +749,171 @@ app.get("/api/stocks/predict/:symbol", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to predict stock prices" });
+  }
+});
+// ===== PORTFOLIO COEFFICIENT OF VARIATION (CV) =====
+app.get("/api/portfolio/:pid/cv", async (req, res) => {
+  const { pid } = req.params;
+  let { start, end } = req.query;
+
+  try {
+    let query;
+    let params;
+
+    if (start && end) {
+      // Use date filter
+      query = `
+        WITH stock_returns AS (
+          SELECT
+            symbol,
+            "timestamp"::date AS day,
+            (close - LAG(close) OVER (PARTITION BY symbol ORDER BY "timestamp"))
+              / LAG(close) OVER (PARTITION BY symbol ORDER BY "timestamp") AS stock_return
+          FROM stocks
+          WHERE "timestamp" BETWEEN $2 AND $3
+        )
+        SELECT
+          sr.symbol,
+          STDDEV_SAMP(sr.stock_return) / NULLIF(AVG(sr.stock_return), 0) AS cv
+        FROM stock_returns sr
+        JOIN stock_holding sh ON sr.symbol = sh.symbol
+        WHERE sh.pid = $1
+          AND sr.stock_return IS NOT NULL
+        GROUP BY sr.symbol
+        ORDER BY sr.symbol;
+      `;
+      params = [pid, start, end];
+    } else {
+      // No date filter – use entire history
+      query = `
+        WITH stock_returns AS (
+          SELECT
+            symbol,
+            "timestamp"::date AS day,
+            (close - LAG(close) OVER (PARTITION BY symbol ORDER BY "timestamp"))
+              / LAG(close) OVER (PARTITION BY symbol ORDER BY "timestamp") AS stock_return
+          FROM stocks
+        )
+        SELECT
+          sr.symbol,
+          STDDEV_SAMP(sr.stock_return) / NULLIF(AVG(sr.stock_return), 0) AS cv
+        FROM stock_returns sr
+        JOIN stock_holding sh ON sr.symbol = sh.symbol
+        WHERE sh.pid = $1
+          AND sr.stock_return IS NOT NULL
+        GROUP BY sr.symbol
+        ORDER BY sr.symbol;
+      `;
+      params = [pid];
+    }
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Portfolio CV error:", err);
+    res.status(500).json({ error: "Failed to compute portfolio CV" });
+  }
+});
+
+// ===== PORTFOLIO BETA =====
+app.get("/api/portfolio/:pid/beta", async (req, res) => {
+  const { pid } = req.params;
+  let { start, end } = req.query;
+
+  try {
+    let query;
+    let params;
+
+    if (start && end) {
+      // Use date filter
+      query = `
+        WITH stock_returns AS (
+          SELECT
+            symbol,
+            "timestamp"::date AS day,
+            (close - LAG(close) OVER (PARTITION BY symbol ORDER BY "timestamp"))
+              / LAG(close) OVER (PARTITION BY symbol ORDER BY "timestamp") AS stock_return
+          FROM stocks
+          WHERE "timestamp" BETWEEN $2 AND $3
+        ),
+        market_returns AS (
+          SELECT
+            day,
+            AVG(stock_return) AS market_return
+          FROM stock_returns
+          WHERE stock_return IS NOT NULL
+          GROUP BY day
+        ),
+        joined AS (
+          SELECT
+            s.symbol,
+            s.day,
+            s.stock_return,
+            m.market_return
+          FROM stock_returns s
+          JOIN market_returns m
+            ON s.day = m.day
+          WHERE s.stock_return IS NOT NULL
+        )
+        SELECT
+          j.symbol,
+          COVAR_SAMP(j.stock_return, j.market_return)
+            / VAR_SAMP(j.market_return) AS beta
+        FROM joined j
+        JOIN stock_holding sh ON j.symbol = sh.symbol
+        WHERE sh.pid = $1
+        GROUP BY j.symbol
+        ORDER BY j.symbol;
+      `;
+      params = [pid, start, end];
+    } else {
+      // No date filter – use entire history
+      query = `
+        WITH stock_returns AS (
+          SELECT
+            symbol,
+            "timestamp"::date AS day,
+            (close - LAG(close) OVER (PARTITION BY symbol ORDER BY "timestamp"))
+              / LAG(close) OVER (PARTITION BY symbol ORDER BY "timestamp") AS stock_return
+          FROM stocks
+        ),
+        market_returns AS (
+          SELECT
+            day,
+            AVG(stock_return) AS market_return
+          FROM stock_returns
+          WHERE stock_return IS NOT NULL
+          GROUP BY day
+        ),
+        joined AS (
+          SELECT
+            s.symbol,
+            s.day,
+            s.stock_return,
+            m.market_return
+          FROM stock_returns s
+          JOIN market_returns m
+            ON s.day = m.day
+          WHERE s.stock_return IS NOT NULL
+        )
+        SELECT
+          j.symbol,
+          COVAR_SAMP(j.stock_return, j.market_return)
+            / VAR_SAMP(j.market_return) AS beta
+        FROM joined j
+        JOIN stock_holding sh ON j.symbol = sh.symbol
+        WHERE sh.pid = $1
+        GROUP BY j.symbol
+        ORDER BY j.symbol;
+      `;
+      params = [pid];
+    }
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Portfolio beta error:", err);
+    res.status(500).json({ error: "Failed to compute portfolio beta" });
   }
 });
 

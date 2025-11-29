@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from "react";
 import PortfolioStats from "./PortfolioStats";
 
-//import pool from "./db.js"; // if you want server-side DB calls (for client, fetch API)
-
 export default function UserPage({ user }) {
   const [portfolios, setPortfolios] = useState([]);
   const [selectedPortfolio, setSelectedPortfolio] = useState(null);
   const [stocks, setStocks] = useState([]);
   const [cash, setCash] = useState(null);
+  const [cv, setCV] = useState([]);
+  const [beta, setBeta] = useState([]);
+  const [startDate, setStartDate] = useState(""); // format: "YYYY-MM-DD"
+  const [endDate, setEndDate] = useState(""); // format: "YYYY-MM-DD"
 
   // Fetch user's portfolios on load
   useEffect(() => {
@@ -21,6 +23,8 @@ export default function UserPage({ user }) {
     if (!selectedPortfolio || !selectedPortfolio.pid) {
       setStocks([]);
       setCash(null);
+      setCV([]);
+      setBeta([]);
       return;
     }
     const pid = selectedPortfolio.pid;
@@ -28,17 +32,37 @@ export default function UserPage({ user }) {
     // Fetch stocks
     fetch(`http://localhost:5000/api/holdings/${pid}`)
       .then((res) => res.json())
-      .then((data) => {
-        console.log("Fetched stocks:", data);
-        setStocks(data);
-      });
+      .then(setStocks);
 
     // Fetch cash
     fetch(`http://localhost:5000/api/cash/portfolio/${pid}`)
       .then((res) => (res.ok ? res.json() : null))
       .then(setCash)
       .catch(() => setCash(null));
+
+    // Fetch portfolio statistics (CV & Beta)
+    fetchStatistics(pid, startDate, endDate);
   }, [selectedPortfolio]);
+
+  const fetchStatistics = (pid, start, end) => {
+    if (!pid) return;
+
+    // Fetch Covariance (CV)
+    fetch(
+      `http://localhost:5000/api/portfolio/${pid}/cv?start=${start}&end=${end}`
+    )
+      .then((res) => res.json())
+      .then(setCV)
+      .catch(() => setCV([]));
+
+    // Fetch Beta Coefficient
+    fetch(
+      `http://localhost:5000/api/portfolio/${pid}/beta?start=${start}&end=${end}`
+    )
+      .then((res) => res.json())
+      .then(setBeta)
+      .catch(() => setBeta([]));
+  };
 
   // Create new portfolio
   const createPortfolio = () => {
@@ -62,16 +86,6 @@ export default function UserPage({ user }) {
   };
 
   // Add stock to portfolio
-  //   const addStock = (symbol, shares) => {
-  //     if (!selectedPortfolio) return;
-  //     fetch(`http://localhost:5000/api/holdings/${selectedPortfolio.pid}`, {
-  //       method: "POST",
-  //       headers: { "Content-Type": "application/json" },
-  //       body: JSON.stringify({ symbol, shares })
-  //     }).then(() => {
-  //       setStocks([...stocks, { symbol, number_of_shares: shares }]);
-  //     });
-  //   };
   const addStock = (symbol, shares) => {
     if (!selectedPortfolio) return;
 
@@ -82,7 +96,6 @@ export default function UserPage({ user }) {
     })
       .then((res) => {
         if (!res.ok) throw new Error("Failed to add stock");
-        // Re-fetch the updated stocks
         return fetch(
           `http://localhost:5000/api/holdings/${selectedPortfolio.pid}`
         );
@@ -101,6 +114,7 @@ export default function UserPage({ user }) {
     ).then(() => setStocks(stocks.filter((s) => s.symbol !== symbol)));
   };
 
+  // Create cash account
   const createCashAccount = () => {
     const value = parseFloat(prompt("Initial Cash Amount"));
     if (isNaN(value)) {
@@ -120,24 +134,14 @@ export default function UserPage({ user }) {
       });
   };
 
+  // Delete cash account
   const deleteCashAccount = () => {
     fetch(`http://localhost:5000/api/cash/${selectedPortfolio.pid}`, {
       method: "DELETE",
-    }).then(() => {
-      setCash(null);
-    });
+    }).then(() => setCash(null));
   };
 
   // Update cash account
-  //   const updateCash = amount => {
-  //     if (!selectedPortfolio) return;
-  //     fetch(`http://localhost:5000/api/cash/update/${selectedPortfolio.pid}`, {
-  //       method: "POST",
-  //       headers: { "Content-Type": "application/json" },
-  //       body: JSON.stringify({ amount, transaction_type: "deposit" })
-  //     }).then(res => res.json())
-  //       .then(setCash);
-  //   };
   const updateCash = (amount) => {
     if (!selectedPortfolio) return;
 
@@ -324,7 +328,67 @@ export default function UserPage({ user }) {
           React.createElement(PortfolioStats, {
             defaultPid: selectedPortfolio.pid,
             defaultSymbol: (stocks[0] && stocks[0].symbol) || "",
-          })
+          }),
+
+          React.createElement("hr"),
+
+          React.createElement("h4", null, "Portfolio Statistics Interval"),
+
+          React.createElement("label", null, "Start Date:"),
+          React.createElement("input", {
+            type: "date",
+            value: startDate,
+            onChange: (e) => setStartDate(e.target.value),
+            style: { marginLeft: 5, marginRight: 10 },
+          }),
+
+          React.createElement("label", null, "End Date:"),
+          React.createElement("input", {
+            type: "date",
+            value: endDate,
+            onChange: (e) => setEndDate(e.target.value),
+            style: { marginLeft: 5, marginRight: 10 },
+          }),
+
+          React.createElement(
+            "button",
+            {
+              onClick: () =>
+                fetchStatistics(selectedPortfolio.pid, startDate, endDate),
+              style: { marginLeft: 10 },
+            },
+            "Fetch CV & Beta"
+          ),
+
+          // Coefficient of Variation and Beta display
+          React.createElement(
+            "div",
+            null,
+            React.createElement("h5", null, "Coefficient of Variation (CV)"),
+            cv.length === 0
+              ? React.createElement("p", null, "No CV data")
+              : cv.map((row) =>
+                  React.createElement(
+                    "div",
+                    { key: row.symbol },
+                    `${row.symbol}: ${Number(row.cv).toFixed(4)}`
+                  )
+                )
+          ),
+          React.createElement(
+            "div",
+            null,
+            React.createElement("h5", null, "Beta Coefficient"),
+            beta.length === 0
+              ? React.createElement("p", null, "No Beta data")
+              : beta.map((row) =>
+                  React.createElement(
+                    "div",
+                    { key: row.symbol },
+                    `${row.symbol}: ${Number(row.beta).toFixed(4)}`
+                  )
+                )
+          )
         )
       )
     );
