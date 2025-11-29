@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from "react";
+import UserPage from "./user";
+import AddStockForm from "./AddStock";
 
 const API_BASE = "http://localhost:5000/api";
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [view, setView] = useState("stocks"); // "stocks" | "stocklists" | "friends"
+  const [view, setView] = useState("stocks");
 
   // Auth
   const [username, setUsername] = useState("");
@@ -20,7 +22,7 @@ export default function App() {
   const [newListPublic, setNewListPublic] = useState(false);
 
   // Active list details
-  const [activeList, setActiveList] = useState(null); // { lid, list_name, is_public, owner_uid }
+  const [activeList, setActiveList] = useState(null);
   const [activeListStocks, setActiveListStocks] = useState([]);
   const [stockSymbol, setStockSymbol] = useState("");
   const [stockShares, setStockShares] = useState("");
@@ -28,12 +30,16 @@ export default function App() {
   // Reviews for active list
   const [reviews, setReviews] = useState([]);
   const [myReviewText, setMyReviewText] = useState("");
-  const [myReviewId, setMyReviewId] = useState(null); // null = no existing review
+  const [myReviewId, setMyReviewId] = useState(null);
 
   // Friends
   const [friends, setFriends] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
   const [requestUserId, setRequestUserId] = useState("");
+
+  //   Stock Predictions
+  const [selectedSymbol, setSelectedSymbol] = useState(null);
+  const [predictionData, setPredictionData] = useState(null);
 
   // ================== AUTH ==================
 
@@ -62,7 +68,7 @@ export default function App() {
 
       if (!res.ok) throw new Error("Login failed");
       const data = await res.json();
-      setUser(data); // { uid, username }
+      setUser(data);
     } catch (err) {
       alert(err.message);
     }
@@ -116,12 +122,10 @@ export default function App() {
 
   const loadFriends = async (uid) => {
     try {
-      // accepted friends
       const friendsRes = await fetch(`${API_BASE}/friends/${uid}`);
       const friendsData = friendsRes.ok ? await friendsRes.json() : [];
       setFriends(friendsData);
 
-      // incoming pending requests
       const pendingRes = await fetch(`${API_BASE}/friends/requests/${uid}`);
       if (pendingRes.ok) {
         const pendingData = await pendingRes.json();
@@ -158,7 +162,6 @@ export default function App() {
       const data = await res.json();
       setReviews(data);
 
-      // Find this user's review (if any)
       const mine = data.find((r) => r.reviewer_uid === uid);
       if (mine) {
         setMyReviewId(mine.rid);
@@ -353,7 +356,6 @@ export default function App() {
     try {
       let res;
       if (myReviewId) {
-        // edit existing
         res = await fetch(`${API_BASE}/reviews/${myReviewId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -363,7 +365,6 @@ export default function App() {
           }),
         });
       } else {
-        // create new
         res = await fetch(`${API_BASE}/reviews/${activeList.lid}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -460,6 +461,19 @@ export default function App() {
     }
   };
 
+  const removeFriend = async (friendUid) => {
+    try {
+      const res = await fetch(
+        `http://localhost:5000/api/friends/${user.uid}/${friendUid}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) throw new Error("Failed to remove friend");
+      await loadFriends(user.uid);
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
   // ================== RENDER HELPERS ==================
 
   const renderAuth = () => (
@@ -498,6 +512,14 @@ export default function App() {
       >
         Stocks
       </button>
+
+      <button
+        onClick={() => setView("portfolio")}
+        style={{ fontWeight: view === "portfolio" ? "bold" : "normal" }}
+      >
+        Portfolio
+      </button>
+
       <button
         onClick={() => setView("stocklists")}
         style={{ fontWeight: view === "stocklists" ? "bold" : "normal" }}
@@ -521,10 +543,12 @@ export default function App() {
     <div>
       <h3>Stocks</h3>
       {stocks.map((s) => (
-        <div key={s.ticker}>
-          {s.ticker} – ${s.price ?? s.close}
+        <div key={s.ticker ?? s.symbol}>
+          {s.ticker ?? s.symbol ?? "?"} – ${s.price ?? s.close ?? "?"}
         </div>
       ))}
+
+      <AddStockForm onAdded={() => loadStocks()} />
     </div>
   );
 
@@ -551,9 +575,9 @@ export default function App() {
         {/* Stocks in list */}
         <h4>Stocks in this list</h4>
         {activeListStocks.length === 0 && <div>No stocks yet.</div>}
-        {activeListStocks.map((s) => (
+        {activeListStocks.map((s, idx) => (
           <div
-            key={s.symbol}
+            key={`${s.symbol}-${idx}`}
             style={{
               display: "flex",
               alignItems: "center",
@@ -754,6 +778,7 @@ export default function App() {
       {friends.map((f) => (
         <div key={f.uid}>
           {f.uid}: {f.username}
+          <button onClick={() => removeFriend(f.uid)}>Remove</button>
         </div>
       ))}
 
@@ -796,6 +821,7 @@ export default function App() {
         <>
           {renderNav()}
           {view === "stocks" && renderStocksView()}
+          {view === "portfolio" && <UserPage user={user} />}
           {view === "stocklists" && renderStockListsView()}
           {view === "friends" && renderFriendsView()}
         </>

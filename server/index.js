@@ -15,7 +15,7 @@ pool.query("SELECT NOW()", (err, res) => {
   }
 });
 
-// ===== FAKE DATABASE (replace later with real DB) =====
+// ===== FAKE DATABASE =====
 let users = [];
 let portfolios = {};
 // let stockLists = {};
@@ -31,7 +31,7 @@ app.post("/api/register", async (req, res) => {
       [username, password]
     );
 
-    res.json(result.rows[0]); // return the created user (no password)
+    res.json(result.rows[0]);
   } catch (err) {
     if (err.code === "23505") {
       return res.status(400).json({ error: "Username already exists" });
@@ -55,7 +55,7 @@ app.post("/api/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid login" });
     }
 
-    res.json(result.rows[0]); // return user info (no password)
+    res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Login failed" });
@@ -116,32 +116,64 @@ app.post("/api/portfolio/:userId", async (req, res) => {
 });
 
 // Get portfolio info (symbol, number of shares) from stock holding by pid
+// app.get("/api/holdings/:pid", async (req, res) => {
+//   const pid = req.params.pid;
+//   try {
+//     const result = await pool.query(
+//       "SELECT symbol, number_of_shares FROM stock_holding WHERE pid = $1",
+//       [pid]
+//     );
+//     res.json(result.rows); // returns array of { symbol, number_of_shares }
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: "Failed to fetch stocks" });
+//   }
+// });
+
+// Also fetch last close price
 app.get("/api/holdings/:pid", async (req, res) => {
   const pid = req.params.pid;
   try {
     const result = await pool.query(
-      "SELECT symbol, number_of_shares FROM stock_holding WHERE pid = $1",
+      `
+      SELECT
+        h.symbol,
+        h.number_of_shares,
+        s.close AS last_close
+      FROM stock_holding h
+      LEFT JOIN LATERAL(
+        SELECT close
+        FROM stocks s
+        WHERE s.symbol = h.symbol
+        ORDER BY "timestamp" DESC
+        LIMIT 1
+      ) s ON TRUE
+      WHERE h.pid = $1
+      `,
       [pid]
     );
-    res.json(result.rows); // returns array of { symbol, number_of_shares }
+
+    res.json(result.rows);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch stocks" });
   }
 });
 
-
-// Add stock holding by pid  
+// Add stock holding by pid
 app.post("/api/holdings/:pid", async (req, res) => {
   const { pid } = req.params;
   const { symbol, shares } = req.body;
   try {
-    await pool.query(`
+    await pool.query(
+      `
       INSERT INTO stock_holding (pid, symbol, number_of_shares)
       VALUES ($1,$2,$3)
       ON CONFLICT (pid, symbol)
       DO UPDATE SET number_of_shares = stock_holding.number_of_shares + EXCLUDED.number_of_shares
-    `, [pid, symbol, shares]);
+    `,
+      [pid, symbol, shares]
+    );
 
     res.json({ success: true });
   } catch (err) {
@@ -149,7 +181,6 @@ app.post("/api/holdings/:pid", async (req, res) => {
     res.status(500).json({ error: "Failed to add stock to portfolio" });
   }
 });
-
 
 // Cash Account
 // get all the cash account of a user with uid
@@ -165,7 +196,7 @@ app.get("/api/cash/user/:uid", async (req, res) => {
       `,
       [uid]
     );
-    res.json(result.rows); // array of cash accounts (pid + value)
+    res.json(result.rows);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch user's cash accounts" });
@@ -185,7 +216,7 @@ app.get("/api/cash/portfolio/:pid", async (req, res) => {
       `,
       [pid]
     );
-    res.json(result.rows[0]); 
+    res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch user's cash accounts" });
@@ -195,7 +226,7 @@ app.get("/api/cash/portfolio/:pid", async (req, res) => {
 // Create new cash account by pid
 app.post("/api/cash/:pid", async (req, res) => {
   const { pid } = req.params;
-  const { value } = req.body; // initial value
+  const { value } = req.body;
 
   try {
     const result = await pool.query(
@@ -214,13 +245,11 @@ app.post("/api/cash/:pid", async (req, res) => {
   }
 });
 
-// transaction in cash account by pid
-// also will insert to transaction table.
+// transaction in cash account by pid also will insert to transaction table.
 app.post("/api/cash/update/:pid", async (req, res) => {
   const { pid } = req.params;
-  const { amount, transaction_type } = req.body; // transaction_type required
+  const { amount, transaction_type } = req.body;
   try {
-    // 1️⃣ Update cash account
     const cashResult = await pool.query(
       `
         UPDATE cash_account
@@ -233,7 +262,6 @@ app.post("/api/cash/update/:pid", async (req, res) => {
     if (cashResult.rows.length === 0) {
       return res.status(404).json({ error: "Cash account not found" });
     }
-    //Insert transaction record
     await pool.query(
       `
         INSERT INTO transaction (pid, amount, transaction_type, shares)
@@ -311,7 +339,6 @@ app.delete("/api/stock/:pid/:symbol", async (req, res) => {
     res.status(500).json({ error: "Failed to delete stock" });
   }
 });
-
 
 // ===== STOCK LISTS =====
 
@@ -618,13 +645,243 @@ app.get("/api/friends/requests/:userId", async (req, res) => {
   }
 });
 
-// ===== STOCK DATA =====
-app.get("/api/stocks", (req, res) => {
-  res.json([
-    { ticker: "AAPL", price: 188.32 },
-    { ticker: "TSLA", price: 254.18 },
-    { ticker: "MSFT", price: 345.22 },
-  ]);
+// Remove a friend
+app.delete("/api/friends/:userId/:friendId", async (req, res) => {
+  const { userId, friendId } = req.params;
+
+  try {
+    const result = await pool.query(
+      `
+      DELETE FROM friend_request
+      WHERE
+        ((requester_uid = $1 AND responder_uid = $2)
+         OR
+         (requester_uid = $2 AND responder_uid = $1))
+        AND is_accepted = TRUE
+      RETURNING requester_uid, responder_uid, is_accepted, send_time
+      `,
+      [userId, friendId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Friendship not found" });
+    }
+
+    res.json({ success: true, removed: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to remove friend" });
+  }
+});
+
+// ===== STOCK PREDICTION =====
+
+// Predict future value of stock with linear regression
+app.get("/api/stocks/predict/:symbol", async (req, res) => {
+  const symbol = req.params.symbol;
+  const days = parseInt(req.query.days || "5", 10);
+
+  if (!days || days <= 0) {
+    return res.status(400).json({ error: "Days must be a positive integer" });
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT "timestamp" AS date, close
+      FROM stocks
+      WHERE symbol = $1
+      ORDER BY "timestamp" ASC
+      `,
+      [symbol]
+    );
+
+    const rows = result.rows;
+
+    if (rows.length < 2) {
+      return res.status(400).json({ error: "Not enough data for prediction" });
+    }
+
+    const n = rows.length;
+    let sumX = 0;
+    let sumY = 0;
+    let sumXY = 0;
+    let sumX2 = 0;
+
+    rows.forEach((row, idx) => {
+      const x = idx + 1;
+      const y = Number(row.close);
+      sumX += x;
+      sumY += y;
+      sumXY += x * y;
+      sumX2 += x * x;
+    });
+
+    const denom = n * sumX2 - sumX * sumX;
+    let slope = 0;
+    let intercept = rows[n - 1].close;
+
+    if (denom !== 0) {
+      slope = (n * sumXY - sumX * sumY) / denom;
+      intercept = (sumY - slope * sumX) / n;
+    }
+
+    const lastDate = new Date(rows[n - 1].date);
+
+    const predictions = [];
+    for (let i = 1; i <= days; i++) {
+      const futureIndex = n + i;
+      const predictedClose = intercept + slope * futureIndex;
+
+      const d = new Date(lastDate);
+      d.setDate(d.getDate() + i);
+
+      predictions.push({
+        date: d.toISOString().slice(0, 10),
+        predicted_close: Number(predictedClose.toFixed(2)),
+      });
+    }
+
+    res.json({
+      symbol,
+      history: rows,
+      predictions,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to predict stock prices" });
+  }
+});
+
+// ===== COVARIANCE / CORRELATION MATRIX =====
+app.get("/api/portfolio/:pid/matrix", async (req, res) => {
+  const { pid } = req.params;
+  let { type, start, end } = req.query;
+
+  if (!type) type = "COVAR_POP";
+
+  if (type !== "COVAR_POP" && type !== "CORR") {
+    return res
+      .status(400)
+      .json({ error: "Invalid type, use COVAR_POP or CORR" });
+  }
+
+  try {
+    const symbolsRes = await pool.query(
+      `SELECT DISTINCT symbol
+       FROM stock_holding
+       WHERE pid = $1
+       ORDER BY symbol`,
+      [pid]
+    );
+
+    if (symbolsRes.rows.length === 0) {
+      return res.status(200).json({
+        message: "No stocks held in this portfolio",
+        symbols: [],
+        matrix: [],
+      });
+    }
+
+    const symbols = symbolsRes.rows.map((r) => r.symbol);
+    const useDates = start && end;
+    const matrix = [];
+
+    for (let i = 0; i < symbols.length; i++) {
+      const row = [];
+      for (let j = 0; j < symbols.length; j++) {
+        let query;
+        let params;
+
+        if (useDates) {
+          query = `
+            SELECT ${type}(s1.close, s2.close) AS value
+            FROM stocks s1
+            JOIN stocks s2
+              ON s1."timestamp" = s2."timestamp"
+            WHERE s1.symbol = $1
+              AND s2.symbol = $2
+              AND s1."timestamp" BETWEEN $3 AND $4
+          `;
+          params = [symbols[i], symbols[j], start, end];
+        } else {
+          query = `
+            SELECT ${type}(s1.close, s2.close) AS value
+            FROM stocks s1
+            JOIN stocks s2
+              ON s1."timestamp" = s2."timestamp"
+            WHERE s1.symbol = $1
+              AND s2.symbol = $2
+          `;
+          params = [symbols[i], symbols[j]];
+        }
+
+        const result = await pool.query(query, params);
+        row.push(result.rows[0].value);
+      }
+      matrix.push(row);
+    }
+
+    return res.status(200).json({
+      type,
+      symbols,
+      matrix,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to compute matrix" });
+  }
+});
+
+// ===== STOCK DATA (from DB) =====
+app.get("/api/stocks", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT "timestamp", open, high, low, close, volume, symbol
+      FROM stocks
+      ORDER BY "timestamp" DESC
+      LIMIT 10
+      `
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Failed to fetch stocks:", err);
+    res.status(500).json({ error: "Failed to fetch stocks" });
+  }
+});
+
+// ===== ADD NEW STOCK ROW =====
+app.post("/api/stocks", async (req, res) => {
+  const { timestamp, open, high, low, close, volume, symbol } = req.body;
+
+  if (
+    !timestamp ||
+    open === undefined ||
+    high === undefined ||
+    low === undefined ||
+    close === undefined ||
+    volume === undefined ||
+    !symbol
+  ) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    const result = await pool.query(
+      `
+      INSERT INTO stocks ("timestamp", open, high, low, close, volume, symbol)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING "timestamp", open, high, low, close, volume, symbol
+      `,
+      [timestamp, open, high, low, close, volume, symbol]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error("Failed to insert stock:", err);
+    res.status(500).json({ error: "Failed to insert stock" });
+  }
 });
 
 app.listen(5000, () => console.log("Backend running on http://localhost:5000"));
