@@ -1,4 +1,6 @@
+// App.jsx
 import React, { useState, useEffect } from "react";
+import UserPage from "./user"; 
 
 const API_BASE = "http://localhost:5000/api";
 
@@ -525,6 +527,11 @@ export default function App() {
           {s.ticker} – ${s.price ?? s.close}
         </div>
       ))}
+
+      {/* Partner's UserPage component from the old App.js */}
+      <div style={{ marginTop: 24 }}>
+        <UserPage user={user} />
+      </div>
     </div>
   );
 

@@ -6,6 +6,10 @@ export default function UserPage({ user }) {
   const [selectedPortfolio, setSelectedPortfolio] = useState(null);
   const [stocks, setStocks] = useState([]);
   const [cash, setCash] = useState(null);
+  const [cv, setCV] = useState([]);
+  const [beta, setBeta] = useState([]);
+  const [startDate, setStartDate] = useState(""); // format: "YYYY-MM-DD"
+  const [endDate, setEndDate] = useState("");     // format: "YYYY-MM-DD"
 
   // Fetch user's portfolios on load
   useEffect(() => {
@@ -36,8 +40,32 @@ export default function UserPage({ user }) {
         .then(res => (res.ok ? res.json() : null))
         .then(setCash)
         .catch(() => setCash(null));
-}, [selectedPortfolio]);
 
+    // Fetch covariance var
+    // fetch(`http://localhost:5000/api/portfolio/${pid}/cv`)
+    // .then(res => res.json())
+    // .then(setCV)
+    // .catch(() => setCV([]));
+
+    // // Fetch beta coeff
+    // fetch(`http://localhost:5000/api/portfolio/${pid}/beta`)
+    //   .then(res => res.json())
+    //   .then(setBeta)
+    //   .catch(() => setBeta([]));
+}, [selectedPortfolio]);
+  const fetchStatistics = (pid, start, end) => {
+    if (!pid) return;
+
+    fetch(`http://localhost:5000/api/portfolio/${pid}/cv?start=${start}&end=${end}`)
+      .then(res => res.json())
+      .then(setCV)
+      .catch(() => setCV([]));
+
+    fetch(`http://localhost:5000/api/portfolio/${pid}/beta?start=${start}&end=${end}`)
+      .then(res => res.json())
+      .then(setBeta)
+      .catch(() => setBeta([]));
+  };
 
   // Create new portfolio
   const createPortfolio = () => {
@@ -189,7 +217,6 @@ export default function UserPage({ user }) {
   );
 
   // Selected portfolio details
-  // Selected portfolio details
 if (selectedPortfolio) {
     children.push(
         React.createElement(
@@ -300,10 +327,116 @@ if (selectedPortfolio) {
             },
             "Add/Delete Stock"
             )
+        ),
+        React.createElement("hr"),
+
+        React.createElement("h4", null, "Portfolio Statistics"),
+
+        /* CV */
+        // React.createElement(
+        //   "div",
+        //   null,
+        //   React.createElement("h5", null, "Coefficient of Variation (CV)"),
+        //   cv.length === 0
+        //     ? React.createElement("p", null, "No CV data")
+        //     : cv.map(row =>
+        //         React.createElement(
+        //           "div",
+        //           { key: row.symbol },
+        //           `${row.symbol}: ${Number(row.cv).toFixed(4)}`
+        //         )
+        //       )
+        // ),
+
+        // /* Beta */
+        // React.createElement(
+        //   "div",
+        //   null,
+        //   React.createElement("h5", null, "Beta Coefficient"),
+        //   beta.length === 0
+        //     ? React.createElement("p", null, "No Beta data")
+        //     : beta.map(row =>
+        //         React.createElement(
+        //           "div",
+        //           { key: row.symbol },
+        //           `${row.symbol}: ${Number(row.beta).toFixed(4)}`
+        //         )
+        //       )
+        // )
+        stocks.length === 0
+        ?React.createElement("p", null, "No Stocks")
+        :React.createElement(
+          "div",
+          { style: { marginBottom: 20 } },
+          React.createElement("h4", null, "Portfolio Statistics Interval"),
+
+          React.createElement("label", null, "Start Date:"),
+          React.createElement("input", {
+            type: "date",
+            value: startDate,
+            onChange: e => setStartDate(e.target.value),
+            style: { marginLeft: 5, marginRight: 10 }
+          }),
+
+          React.createElement("label", null, "End Date:"),
+          React.createElement("input", {
+            type: "date",
+            value: endDate,
+            onChange: e => setEndDate(e.target.value),
+            style: { marginLeft: 5, marginRight: 10 }
+          }),
+
+          React.createElement(
+            "button",
+            {
+              onClick: () => fetchStatistics(selectedPortfolio.pid, startDate, endDate),
+              style: { marginLeft: 10 }
+            },
+            "Fetch CV & Beta"
+          ),
+
+          React.createElement(
+            "div",
+            null,
+            React.createElement("h5", null, "Coefficient of Variation (CV)"),
+            cv.length === 0
+              ? React.createElement("p", null, "No CV data")
+              : cv.map(row =>
+                  React.createElement(
+                    "div",
+                    { key: row.symbol },
+                    `${row.symbol}: ${Number(row.cv).toFixed(4)}`
+                  )
+                )
+          ),
+          React.createElement(
+            "div",
+            null,
+            React.createElement("h5", null, "Beta Coefficient"),
+            beta.length === 0
+              ? React.createElement("p", null, "No Beta data")
+              : beta.map(row =>
+                  React.createElement(
+                    "div",
+                    { key: row.symbol },
+                    `${row.symbol}: ${Number(row.beta).toFixed(4)}`
+                  )
+                )
+          )
         )
         )
     );
     }
+
+  // Display CV
+children.push(
+  
+);
+
+// Display Beta
+children.push(
+  
+);
 
 
   return React.createElement("div", { style: { padding: 20 } }, children);

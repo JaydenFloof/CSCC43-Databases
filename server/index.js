@@ -15,12 +15,6 @@ pool.query("SELECT NOW()", (err, res) => {
   }
 });
 
-// ===== FAKE DATABASE (replace later with real DB) =====
-let users = [];
-let portfolios = {};
-// let stockLists = {};
-// let friends = {};
-
 // ===== AUTH =====
 app.post("/api/register", async (req, res) => {
   const { username, password } = req.body;
@@ -311,6 +305,99 @@ app.delete("/api/stock/:pid/:symbol", async (req, res) => {
     res.status(500).json({ error: "Failed to delete stock" });
   }
 });
+
+//portfolio cv
+app.get("/api/portfolio/:pid/cv", async (req, res) => {
+  const { pid } = req.params;
+  const { start, end } = req.query;
+
+  try {
+    const result = await pool.query(`
+      WITH stock_returns AS (
+        SELECT
+          symbol,
+          timestamp::date AS day,
+          (close - LAG(close) OVER (PARTITION BY symbol ORDER BY timestamp))
+            / LAG(close) OVER (PARTITION BY symbol ORDER BY timestamp) AS stock_return
+        FROM stocks
+        WHERE timestamp BETWEEN $2 AND $3
+      )
+
+      SELECT
+        sr.symbol,
+        STDDEV_SAMP(sr.stock_return) / NULLIF(AVG(sr.stock_return),0) AS cv
+      FROM stock_returns sr
+      JOIN stock_holding sh ON sr.symbol = sh.symbol
+      WHERE sh.pid = $1
+        AND sr.stock_return IS NOT NULL
+      GROUP BY sr.symbol
+      ORDER BY sr.symbol;
+    `, [pid, start, end]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Portfolio CV error:", err);
+    res.status(500).json({ error: "Failed to compute portfolio CV" });
+  }
+});
+
+
+// portfolio beta
+app.get("/api/portfolio/:pid/beta", async (req, res) => {
+  const { pid } = req.params;
+  const { start, end } = req.query;
+
+  try {
+    const result = await pool.query(`
+      WITH stock_returns AS (
+        SELECT
+          symbol,
+          timestamp::date AS day,
+          (close - LAG(close) OVER (PARTITION BY symbol ORDER BY timestamp))
+            / LAG(close) OVER (PARTITION BY symbol ORDER BY timestamp) AS stock_return
+        FROM stocks
+        WHERE timestamp BETWEEN $2 AND $3
+      ),
+
+      market_returns AS (
+        SELECT
+          day,
+          AVG(stock_return) AS market_return
+        FROM stock_returns
+        WHERE stock_return IS NOT NULL
+        GROUP BY day
+      ),
+
+      joined AS (
+        SELECT
+          s.symbol,
+          s.day,
+          s.stock_return,
+          m.market_return
+        FROM stock_returns s
+        JOIN market_returns m
+          ON s.day = m.day
+        WHERE s.stock_return IS NOT NULL
+      )
+
+      SELECT
+        j.symbol,
+        COVAR_SAMP(j.stock_return, j.market_return)
+          / VAR_SAMP(j.market_return) AS beta
+      FROM joined j
+      JOIN stock_holding sh ON j.symbol = sh.symbol
+      WHERE sh.pid = $1
+      GROUP BY j.symbol
+      ORDER BY j.symbol;
+    `, [pid, start, end]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Portfolio beta error:", err);
+    res.status(500).json({ error: "Failed to compute portfolio beta" });
+  }
+});
+
 
 
 // ===== STOCK LISTS =====
