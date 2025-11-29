@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import UserPage from "./user.js"; 
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -42,59 +43,23 @@ export default function App() {
   };
 
   const children = [];
-
-  children.push(
-    React.createElement("h1", { key: "title" }, "Stock App")
-  );
+  children.push(React.createElement("h1", { key: "title" }, "Stock App"));
 
   if (!user) {
     children.push(
       React.createElement(
         "div",
-        { key: "auth", style: { display: "flex", flexDirection: "column", maxWidth: 200 } },
-
-        React.createElement("input", {
-          type: "text",
-          placeholder: "Username",
-          value: username,
-          onChange: e => setUsername(e.target.value),
-          style: { marginBottom: 5, padding: 5 }
-        }),
-
-        React.createElement("input", {
-          type: "password",
-          placeholder: "Password",
-          value: password,
-          onChange: e => setPassword(e.target.value),
-          style: { marginBottom: 5, padding: 5 }
-        }),
-
-        React.createElement("button", { onClick: register, style: { marginBottom: 5 } }, "Register"),
+        { key: "auth" },
+        React.createElement("input", { value: username, onChange: e => setUsername(e.target.value), placeholder: "Username" }),
+        React.createElement("input", { type: "password", value: password, onChange: e => setPassword(e.target.value), placeholder: "Password" }),
+        React.createElement("button", { onClick: register }, "Register"),
         React.createElement("button", { onClick: login }, "Login")
       )
     );
   } else {
-    children.push(
-      React.createElement(
-        "div",
-        { key: "main" },
-        React.createElement("h2", null, "Welcome " + user.username),   // FIXED
-        React.createElement("h3", null, "Stocks"),
-
-        React.createElement(
-          "div",
-          null,
-          stocks.map(function(s) {
-            return React.createElement(
-              "div",
-              { key: s.symbol },          // FIXED
-              s.symbol + " - $" + s.close // FIXED
-            );
-          })
-        )
-      )
-    );
+    // Render the user page component
+    children.push(React.createElement(UserPage, { user }));
   }
 
-  return React.createElement("div", { style: { padding: 20 } }, children);
+  return React.createElement("div", null, children);
 }
